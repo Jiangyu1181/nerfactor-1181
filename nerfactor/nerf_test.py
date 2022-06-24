@@ -22,6 +22,10 @@ from nerfactor.util import logging as logutil, io as ioutil, \
     config as configutil
 from third_party.xiuminglib import xiuminglib as xm
 
+import os
+
+os.environ['AUTOGRAPH_VERBOSITY'] = '1'
+os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
 
 flags.DEFINE_string(
     'ckpt', '/path/to/ckpt-100', "path to checkpoint (prefix only)")

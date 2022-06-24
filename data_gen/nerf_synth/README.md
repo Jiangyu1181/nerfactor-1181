@@ -69,6 +69,42 @@ REPO_DIR="$repo_dir" BLENDER_BIN="$blender_bin" "$repo_dir/data_gen/nerf_synth/r
 # Note: We used stdout redirection to silence Blender's rendering prints
 ```
 
+# jiangyu1181 add
+```bash
+   cd /mnt/data2/jy/software
+   # Download
+   wget https://download.blender.org/release/Blender2.83/blender-2.83.4-linux64.tar.xz
+   # Unzip the pre-built binaries
+   tar -xvf blender-2.83.4-linux64.tar.xz
+   
+   cd /mnt/data2/jy/softwareblender-2.83.4-linux64/2.83/python/bin
+   # Install pip for THIS Blender-bundled Python
+   curl https://bootstrap.pypa.io/get-pip.py | ./python2.83m
+   # If the above fails, make sure you deactivate your Conda environment
+   # Use THIS pip to install other dependencies
+   ./pip install absl-py tqdm ipython numpy Pillow opencv-python
+```
+
+```bash
+scene='human'
+light='3072'  # make sure this is same as the light used in the blender!
+blender_bin="/mnt/data2/jy/software/blender-2.83.4-linux64/blender"
+scene_path="/mnt/data2/jy/datasets/nerfactor/blender/$scene.blend"
+light_path="/mnt/data2/jy/datasets/nerfactor/light-probes/train/$light.hdr"
+cam_dir="/mnt/data2/jy/datasets/nerfactor/rendered-images/${scene}1"
+test_light_dir="/mnt/data2/jy/datasets/nerfactor/light-probes/test"
+light_inten='3'
+if [[ "$scene" == drums || "$scene" == lego ]]; then
+    add_glossy_albedo='true'
+else
+    add_glossy_albedo='false'
+fi
+outdir="/mnt/data2/jy/datasets/nerfactor/rendered-images/${scene}1"
+repo_dir="/mnt/data2/jy/NeRFactor"
+REPO_DIR="$repo_dir" BLENDER_BIN="$blender_bin" "$repo_dir/data_gen/nerf_synth/render_run.sh" --scene_path="$scene_path" --light_path="$light_path" --cam_dir="$cam_dir" --test_light_dir="$test_light_dir" --light_inten="$light_inten" --add_glossy_albedo="$add_glossy_albedo" --outdir="$outdir" 1> /dev/null
+# Note: We used stdout redirection to silence Blender's rendering prints
+```
+
 We modified our parallel rendering code to this current version that renders all
 views sequentially for portability. If you have a cluster, consider distributing
 all views across the cluster to render them in parallel. The heavylifting

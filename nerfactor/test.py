@@ -12,22 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 from os.path import join, basename
-from absl import app, flags
+
 import numpy as np
-from tqdm import tqdm
 import tensorflow as tf
+from absl import app, flags
+from tqdm import tqdm
 
 from nerfactor import datasets
 from nerfactor import models
 from nerfactor.util import logging as logutil, io as ioutil, \
     config as configutil
-from third_party.xiuminglib import xiuminglib as xm
 from third_party.turbo_colormap import turbo_colormap_data, interpolate_or_clip
+from third_party.xiuminglib import xiuminglib as xm
 
+os.environ['CUDA_VISIBLE_DEVICES'] = '6'
+# os.environ['AUTOGRAPH_VERBOSITY'] = '1'
+os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
 
 flags.DEFINE_string(
-    'ckpt', '/path/to/ckpt-100', "path to checkpoint (prefix only)")
+    'ckpt',
+    '/mnt/data2/jy/NeRFactor/output/train/human_nerfactor512rays1024n1f10/lr5e-3/checkpoints/ckpt-10',
+    "path to checkpoint (prefix only)")
 flags.DEFINE_boolean('color_correct_albedo', False, "")
 flags.DEFINE_integer(
     'sv_axis_i', 0, "along which axis we do spatially-varying edits")
@@ -66,11 +73,11 @@ def compute_rgb_scales(alpha_thres=0.9):
     gt_path = join(data_root, view, 'albedo.png')
 
     # Load prediction and GT
-    pred = xm.io.img.read(pred_path) # gamma corrected
-    gt = xm.io.img.read(gt_path) # linear
+    pred = xm.io.img.read(pred_path)  # gamma corrected
+    gt = xm.io.img.read(gt_path)  # linear
     pred = xm.img.normalize_uint(pred)
     gt = xm.img.normalize_uint(gt)
-    pred = pred ** 2.2 # undo gamma
+    pred = pred ** 2.2  # undo gamma
     gt = xm.img.resize(gt, new_h=pred.shape[0], method='tf')
     alpha = gt[:, :, 3]
     gt = gt[:, :, :3]
@@ -121,7 +128,7 @@ def get_albedo_override(xyz):
     if FLAGS.tgt_albedo == 'turbo':
         axis = xyz[:, FLAGS.sv_axis_i].numpy()
         axis_normalized = (axis - FLAGS.sv_axis_min) / (
-            FLAGS.sv_axis_max - FLAGS.sv_axis_min)
+                FLAGS.sv_axis_max - FLAGS.sv_axis_min)
         tgt_albedo = []
         for x in axis_normalized:
             color = interpolate_or_clip(turbo_colormap_data, x)
@@ -172,14 +179,14 @@ def main(_):
     brdf_z_override = None
     if FLAGS.tgt_brdf:
         tgt_brdf_z = model.brdf_model.latent_code.z[
-            model.brdf_model.brdf_names.index(FLAGS.tgt_brdf), :]
+                     model.brdf_model.brdf_names.index(FLAGS.tgt_brdf), :]
         brdf_z_override = tf.convert_to_tensor(tgt_brdf_z, dtype=tf.float32)
 
     # For all test views
     logger.info("Running inference")
     for batch_i, batch in enumerate(
             tqdm(datapipe, desc="Inferring Views", total=n_views)):
-        relight_olat = batch_i == n_views - 1 # only for the final view
+        relight_olat = batch_i == n_views - 1  # only for the final view
         # Optionally, edit (spatially-varying) albedo
         albedo_override = None
         if FLAGS.tgt_albedo:
@@ -200,7 +207,7 @@ def main(_):
     # Compile all visualized batches into a consolidated view (e.g., an
     # HTML or a video)
     batch_vis_dirs = xm.os.sortglob(outroot, 'batch?????????')
-    outpref = outroot # proper extension should be added in the function below
+    outpref = outroot  # proper extension should be added in the function below
     view_at = model.compile_batch_vis(batch_vis_dirs, outpref, mode='test')
     logger.info("Compilation available for viewing at\n\t%s", view_at)
 

@@ -15,30 +15,109 @@
 """A general training and validation pipeline.
 """
 
+import os
+from collections import deque
 from os.path import join, dirname, exists
 from shutil import rmtree
 from time import time
-from collections import deque
-from tqdm import tqdm
-from absl import app, flags
-import tensorflow as tf
 
-from third_party.xiuminglib import xiuminglib as xm
+import tensorflow as tf
+from absl import app, flags
+from tqdm import tqdm
+
 from nerfactor import datasets
 from nerfactor import models
 from nerfactor.util import logging as logutil, io as ioutil, \
     config as configutil
+from third_party.xiuminglib import xiuminglib as xm
 
+# os.environ['CUDA_VISIBLE_DEVICES'] = '4'
+# os.environ['AUTOGRAPH_VERBOSITY'] = '1'
+os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
+# config = tf.compat.v1.ConfigProto()
+# config.gpu_options.allow_growth = True
+# session = tf.compat.v1.Session(config=config)
 
 flags.DEFINE_string(
     'config', 'nerf.ini', "base .ini file in config/ or a full path")
 flags.DEFINE_string('config_override', '', "e.g., 'key1=value1,key2=value2'")
 flags.DEFINE_boolean('debug', False, "debug mode switch")
 flags.DEFINE_enum(
-    'device', 'gpu', ['cpu', 'gpu'], "running on what type of device(s)")
+    'device', 'cpu', ['cpu', 'gpu'], "running on what type of device(s)")
 FLAGS = flags.FLAGS
 
 logger = logutil.Logger(loggee="trainvali")
+
+# ======================================================================================================================
+#  0. (Only once for all scenes) Learn data-driven BRDF priors (using a single GPU suffices):
+# os.environ['CUDA_VISIBLE_DEVICES'] = '6'
+# FLAGS.config = 'brdf.ini'
+# scene = 'human'
+# data_root = "/mnt/data2/jy/datasets/nerfactor/brdf_merl_npz/ims512_envmaph16_spp1"
+# outroot = "/mnt/data2/jy/NeRFactor/output/train/merl"
+# viewer_prefix = ''
+# FLAGS.config_override = 'data_root=%s,outroot=%s,viewer_prefix=%s,n_rays_per_step=256' % (data_root, outroot, viewer_prefix)
+# ======================================================================================================================
+#  1. Train a vanilla NeRF, optionally using multiple GPUs
+# os.environ['CUDA_VISIBLE_DEVICES'] = '2,3,6'
+# FLAGS.config = 'nerf.ini'
+#
+# scene = 'human'
+# data_root = "/mnt/data2/jy/datasets/nerfactor/rendered-images/%s" % scene
+# outroot = "/mnt/data2/jy/NeRFactor/output/train/%s_nerf" % scene
+# viewer_prefix = ''
+# n_rays_per_step = '256'
+# FLAGS.config_override = 'n_rays_per_step=%s,data_root=%s,lr=%s,outroot=%s,viewer_prefix=%s' % (
+#     n_rays_per_step, data_root, '5e-4', outroot, viewer_prefix
+# )
+# ======================================================================================================================
+# 3. Shape Pre-Training
+# os.environ['CUDA_VISIBLE_DEVICES'] = '3'
+# FLAGS.config = 'shape.ini'
+# scene = 'human'
+# imh = '256'
+# near = '1'
+# far = '10'
+# n_rays_per_step = '256'
+# use_nerf_alpha = 'False'
+# overwrite = 'True'
+# data_root = "/mnt/data2/jy/datasets/nerfactor/rendered-images/%s" % scene
+# surf_root = "/mnt/data2/jy/NeRFactor/output/surf/%s%srays%s" % (scene, imh, n_rays_per_step)
+# shape_outdir = "/mnt/data2/jy/NeRFactor/output/train/%s_shape%srays%sn%sf%s" % (scene, imh, n_rays_per_step, near, far)
+# viewer_prefix = ''
+# imh = '512'
+# FLAGS.config_override = 'n_rays_per_step=%s,data_root=%s,imh=%s,outroot=%s,viewer_prefix=%s,near=%s,far=%s,' \
+#                         'use_nerf_alpha=%s,data_nerf_root=%s,overwrite=%s' % \
+#                         (n_rays_per_step, data_root, imh, shape_outdir, viewer_prefix, near,
+#                          far, use_nerf_alpha, surf_root, overwrite)
+# ======================================================================================================================
+# 4. Joint Optimization (training and validation)
+# FLAGS.config = 'nerfactor.ini'
+# scene = 'human'
+# imh = '512'
+# n_rays_per_step = '1024'
+# near = '1'
+# far = '10'
+# use_nerf_alpha = 'False'
+# xyz_jitter_std = '0.01'
+# overwrite = 'True'
+# data_root = "/mnt/data2/jy/datasets/nerfactor/rendered-images/%s" % scene
+# surf_root = "/mnt/data2/jy/NeRFactor/output/surf/%s%srays%s" % (scene, imh, n_rays_per_step)
+# shape_outdir = "/mnt/data2/jy/NeRFactor/output/train/%s_shape%srays%sn%sf%s" % (scene, imh, n_rays_per_step, near, far)
+# shape_ckpt = "%s/lr1e-2/checkpoints/ckpt-2" % shape_outdir
+# brdf_ckpt = "/mnt/data2/jy/NeRFactor/output/train/merl%srays%s/lr1e-2/checkpoints/ckpt-50" % (imh, n_rays_per_step)
+# # brdf_ckpt = "/mnt/data2/jy/NeRFactor/output/train/merl%srays%s/lr1e-2/checkpoints/ckpt-50" % ("512", "256")
+# viewer_prefix = ''
+# test_envmap_dir = "/mnt/data2/jy/datasets/nerfactor/light-probes/test"
+# shape_mode = 'finetune'
+# outroot = "/mnt/data2/jy/NeRFactor/output/train/%s_nerfactor%srays%sn%sf%s" % (scene, imh, n_rays_per_step, near, far)
+# FLAGS.config_override = 'data_root=%s,imh=%s,outroot=%s,viewer_prefix=%s,near=%s,far=%s,' \
+#                         'use_nerf_alpha=%s,data_nerf_root=%s,overwrite=%s,shape_model_ckpt=%s,brdf_model_ckpt=%s,' \
+#                         'xyz_jitter_std=%s,test_envmap_dir=%s,shape_mode=%s,n_rays_per_step=%s' % \
+#                         (data_root, imh, outroot, viewer_prefix, near, far,
+#                          use_nerf_alpha, surf_root, overwrite, shape_ckpt, brdf_ckpt,
+#                          xyz_jitter_std, test_envmap_dir, shape_mode, n_rays_per_step)
+# ======================================================================================================================
 
 
 def main(_):
@@ -86,7 +165,7 @@ def main(_):
 
     # Make validation dataset
     dataset_vali = Dataset(config, 'vali', debug=FLAGS.debug)
-    global_bs_vali = dataset_vali.bs # maybe different from training
+    global_bs_vali = dataset_vali.bs  # maybe different from training
     try:
         datapipe_vali = dataset_vali.build_pipeline(no_batch=no_batch)
     except FileNotFoundError:
@@ -135,7 +214,7 @@ def main(_):
             step=tf.Variable(0), optimizer=optimizer, net=model)
         keep_recent_epochs = config.getint('DEFAULT', 'keep_recent_epochs')
         if keep_recent_epochs <= 0:
-            keep_recent_epochs = None # keep all epochs
+            keep_recent_epochs = None  # keep all epochs
         ckptmanager = tf.train.CheckpointManager(
             ckpt, ckptdir, max_to_keep=keep_recent_epochs)
         ckpt.restore(ckptmanager.latest_checkpoint)
@@ -161,7 +240,7 @@ def main(_):
         train_vis_batch_dir = join(train_vis_epoch_dir, 'batch{b:09d}')
         vali_vis_batch_dir = join(vali_vis_epoch_dir, 'batch{b:09d}')
         train_vis_batches_comp = join(train_vis_epoch_dir, 'all')
-        vali_vis_batches_comp = join(vali_vis_epoch_dir, 'all') # add proper
+        vali_vis_batches_comp = join(vali_vis_epoch_dir, 'all')  # add proper
         # extension yourself in your overriding function (this makes the
         # pipeline general and not specific to any model)
 
@@ -259,7 +338,6 @@ def main(_):
 def get_strategy():
     """Creates a distributed strategy.
     """
-    strategy = None
     if FLAGS.device == 'cpu':
         strategy = tf.distribute.OneDeviceStrategy('/cpu:0')
     elif FLAGS.device == 'gpu':
@@ -277,7 +355,7 @@ def distributed_train_step(strategy, model, batch, optimizer, global_bs):
     def train_step(batch):
         with tf.GradientTape() as tape:
             pred, gt, loss_kwargs, partial_to_vis = model(batch, mode='train')
-            loss_kwargs['keep_batch'] = True # keep the batch dimension
+            loss_kwargs['keep_batch'] = True  # keep the batch dimension
             per_example_loss = model.compute_loss(pred, gt, **loss_kwargs)
             weighted_loss = tf.nn.compute_average_loss(
                 per_example_loss, global_batch_size=global_bs)
@@ -301,7 +379,7 @@ def distributed_train_step(strategy, model, batch, optimizer, global_bs):
 def distributed_vali_step(strategy, model, batch, global_bs):
     def vali_step(batch):
         pred, gt, loss_kwargs, partial_to_vis = model(batch, mode='vali')
-        loss_kwargs['keep_batch'] = True # keep the batch dimension
+        loss_kwargs['keep_batch'] = True  # keep the batch dimension
         per_example_loss = model.compute_loss(pred, gt, **loss_kwargs)
         weighted_loss = tf.nn.compute_average_loss(
             per_example_loss, global_batch_size=global_bs)
@@ -333,7 +411,7 @@ def aggeregate_dstributed(strategy, weighted_loss, partial_to_vis):
 def maintain_epoch_queue(queue, new_epoch_dir):
     queue.appendleft(new_epoch_dir)
     for epoch_dir in xm.os.sortglob(dirname(new_epoch_dir), '*'):
-        if epoch_dir not in queue: # already evicted from queue (FIFO)
+        if epoch_dir not in queue:  # already evicted from queue (FIFO)
             rmtree(epoch_dir)
 
 

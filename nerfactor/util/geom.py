@@ -15,10 +15,11 @@
 # pylint: disable=invalid-unary-operand-type
 
 from os.path import join
+
 import numpy as np
+import tensorflow as tf
 from scipy.spatial import ConvexHull, Delaunay
 from scipy.spatial.qhull import QhullError
-import tensorflow as tf
 
 from third_party.xiuminglib import xiuminglib as xm
 from . import math as mathutil
@@ -34,10 +35,11 @@ def write_lvis(lvis, fps, out_dir):
     vis_out = join(out_dir, 'lvis.png')
     lvis_avg = np.mean(lvis, axis=2)
     xm.io.img.write_arr(lvis_avg, vis_out)
+    # jiangyu1181
     # Visualize light visibility for each light pixel
     vis_out = join(out_dir, 'lvis.mp4')
     frames = []
-    for i in range(lvis.shape[2]): # for each light pixel
+    for i in range(lvis.shape[2]):  # for each light pixel
         frame = xm.img.denormalize_float(lvis[:, :, i])
         frame = np.dstack([frame] * 3)
         frames.append(frame)
@@ -173,11 +175,11 @@ def dir2rusink(a, b):
         vector = tf.reshape(vector, (-1, 3))
         axis = tf.reshape(tf.convert_to_tensor(axis, dtype=tf.float32), (-1, 3))
         return vector * cos_ang[:, None] + \
-            axis * tf.matmul(
-                vector, tf.transpose(axis)) * (1 - cos_ang)[:, None] + \
-            tf.linalg.cross(
-                tf.tile(axis, (tf.shape(vector)[0], 1)),
-                vector) * sin_ang[:, None]
+               axis * tf.matmul(
+            vector, tf.transpose(axis)) * (1 - cos_ang)[:, None] + \
+               tf.linalg.cross(
+                   tf.tile(axis, (tf.shape(vector)[0], 1)),
+                   vector) * sin_ang[:, None]
 
     # What is the incoming/outgoing direction in the Rusink. frame?
     diff = rot_vec(rot_vec(b, normal, -phi_h), binormal, -theta_h)

@@ -15,17 +15,17 @@
 # pylint: disable=arguments-differ
 
 from os.path import join, exists
-import numpy as np
-from tqdm import tqdm
-import tensorflow as tf
 
-from third_party.xiuminglib import xiuminglib as xm
+import numpy as np
+import tensorflow as tf
+from tqdm import tqdm
+
+from nerfactor.models.base import Model as BaseModel
 from nerfactor.networks import mlp
 from nerfactor.networks.embedder import Embedder
 from nerfactor.util import logging as logutil, math as mathutil, io as ioutil, \
     img as imgutil
-from nerfactor.models.base import Model as BaseModel
-
+from third_party.xiuminglib import xiuminglib as xm
 
 logger = logutil.Logger(loggee="models/nerf")
 
@@ -61,13 +61,13 @@ class Model(BaseModel):
         # Shortcircuit if not using viewing directions
         if not self.use_views:
             net['rgbs_out'] = mlp.Network(
-                [4], act=[None]) # needs different activations
+                [4], act=[None])  # needs different activations
             return net
         # Using viewing directions
-        net['sigma_out'] = mlp.Network([1], act=[None]) # ReLU later
-        net['bottleneck'] = mlp.Network([mlp_width], act=[None]) # no act.
+        net['sigma_out'] = mlp.Network([1], act=[None])  # ReLU later
+        net['bottleneck'] = mlp.Network([mlp_width], act=[None])  # no act.
         net['rgb_out'] = mlp.Network(
-            [mlp_width // 2, 3], act=[act, None]) # sigmoid later
+            [mlp_width // 2, 3], act=[act, None])  # sigmoid later
         return net
 
     def _init_embedder(self):
@@ -101,7 +101,7 @@ class Model(BaseModel):
 
     def call(self, batch, mode='train'):
         self._validate_mode(mode)
-        id_, hw, rayo, rayd, rgb = batch # all flattened
+        id_, hw, rayo, rayd, rgb = batch  # all flattened
         pred_coarse, pred_fine = self._render_rays(rayo, rayd, mode=mode)
         # Prepare values to return
         pred = {
@@ -138,11 +138,11 @@ class Model(BaseModel):
     @staticmethod
     def gen_z_fine(z_coarse, weights, n_samples_fine, perturb=False):
         mid = .5 * (z_coarse[:, 1:] + z_coarse[:, :-1])
-        z_fine = mathutil.inv_transform_sample( # (n_rays, n_samples_fine)
+        z_fine = mathutil.inv_transform_sample(  # (n_rays, n_samples_fine)
             mid, weights[..., 1:-1], n_samples_fine, det=not perturb)
         z_fine = tf.stop_gradient(z_fine)
         # Obtain all points to evaluate the model at
-        z_all = tf.sort( # (n_rays, n_samples_coarse + n_samples_fine)
+        z_all = tf.sort(  # (n_rays, n_samples_coarse + n_samples_fine)
             tf.concat((z_coarse, z_fine), -1), -1)
         return z_all
 
@@ -151,7 +151,7 @@ class Model(BaseModel):
         lin_in_disp = self.config.getboolean('DEFAULT', 'lin_in_disp')
         if mode == 'train':
             perturb = self.config.getboolean('DEFAULT', 'perturb')
-        else: # NOTE: at validation/test time, do not randomize
+        else:  # NOTE: at validation/test time, do not randomize
             perturb = False
         # Normalize ray directions
         rayd = tf.linalg.l2_normalize(rayd, axis=1)
@@ -160,7 +160,7 @@ class Model(BaseModel):
             self.near, self.far, n_samples_coarse, rayo.shape[0],
             lin_in_disp=lin_in_disp, perturb=perturb)
         pts = rayo[:, None, :] + \
-            rayd[:, None, :] * z[:, :, None] # (n_rays, n_samples, 3)
+              rayd[:, None, :] * z[:, :, None]  # (n_rays, n_samples, 3)
         views = tf.broadcast_to(rayd[:, None, :], pts.shape)
         rgbs = self._eval_nerf_at(pts, views, use_fine=False)
         # Accumulate samples along rays
@@ -173,7 +173,7 @@ class Model(BaseModel):
         # Obtain additional samples based on the weights in coarse model
         z = self.gen_z_fine(z, weights, self.n_samples_fine, perturb=perturb)
         pts = rayo[:, None, :] + rayd[:, None, :] * z[
-            :, :, None] # (n_rays, n_samples_coarse + n_samples_fine, 3)
+                                                    :, :, None]  # (n_rays, n_samples_coarse + n_samples_fine, 3)
         views = tf.broadcast_to(rayd[:, None, :], pts.shape)
         rgbs = self._eval_nerf_at(pts, views, use_fine=True)
         # Accumulate samples along rays
@@ -187,17 +187,17 @@ class Model(BaseModel):
         # Compute "distance" (in time) between each integration time along a ray
         dist = z[:, 1:] - z[:, :-1]
         # The "distance" from the last integration time is infinity
-        dist = tf.concat( # (n_rays, n_samples)
+        dist = tf.concat(  # (n_rays, n_samples)
             (dist, tf.broadcast_to([inf], dist[:, :1].shape)), axis=-1)
-        dist = dist * tf.linalg.norm( # should be redundant because rayd is
-            rayd[:, None, :], axis=-1) # already normalized
+        dist = dist * tf.linalg.norm(  # should be redundant because rayd is
+            rayd[:, None, :], axis=-1)  # already normalized
         # Add noise to model's predictions for density. Can be used to
         # regularize network during training (prevents floater artifacts)
         noise = tf.random.normal(sigma.shape) * noise_std
         # Predict density of each sample along each ray. Higher values imply
         # higher likelihood of being absorbed at this point
-        density = 1.0 - tf.exp( # (n_rays, n_samples)
-            -tf.nn.relu(sigma + noise) * dist) # NOTE
+        density = 1.0 - tf.exp(  # (n_rays, n_samples)
+            -tf.nn.relu(sigma + noise) * dist)  # NOTE
         # Chunk by chunk to avoid OOM
         weights_chunks = []
         for i in range(0, density.shape[0], accu_chunk):
@@ -206,7 +206,7 @@ class Model(BaseModel):
             # cumprod() is used to express the idea of the ray not having
             # reflected up to this sample yet
             weights_chunk = density_chunk * mathutil.safe_cumprod(
-                1. - density_chunk) # (n_rays_chunk, n_samples)
+                1. - density_chunk)  # (n_rays_chunk, n_samples)
             weights_chunks.append(weights_chunk)
         weights = tf.concat(weights_chunks, axis=0)
         return weights
@@ -220,7 +220,7 @@ class Model(BaseModel):
             sigma, z, rayd, noise_std=noise_std, accu_chunk=accu_chunk)
         # Extract RGB of each sample position along each ray
         rgb = rgbs[:, :, :3]
-        rgb = tf.math.sigmoid(rgb) # NOTE # (n_rays, n_samples, 3)
+        rgb = tf.math.sigmoid(rgb)  # NOTE # (n_rays, n_samples, 3)
         # Weighted sums along all rays
         rgb_chunks, depth_chunks, disp_chunks, occu_chunks = [], [], [], []
         for i in range(0, weights.shape[0], accu_chunk):
@@ -231,10 +231,10 @@ class Model(BaseModel):
             # Sum of weights along each ray, in [0, 1] up to numerical errors
             occu_chunk = tf.reduce_sum(weights_chunk, axis=-1)
             # Computed weighted color of each sample along each ray
-            rgb_chunk = tf.reduce_sum( # (n_rays_chunk, 3)
+            rgb_chunk = tf.reduce_sum(  # (n_rays_chunk, 3)
                 weights_chunk[:, :, None] * rgb_chunk, axis=-2)
             # Estimated depth is expected distance
-            depth_chunk = tf.reduce_sum( # (n_rays_chunk,)
+            depth_chunk = tf.reduce_sum(  # (n_rays_chunk,)
                 weights_chunk * z_chunk, axis=-1)
             # Disparity is inverse depth
             denom = tf.maximum(depth_chunk, eps)
@@ -285,7 +285,7 @@ class Model(BaseModel):
                 rgbs_out = self.net[pref + 'rgbs_out']
                 rgbs_flat = rgbs_out(enc(pts_embed))
             rgbs_chunks.append(rgbs_flat)
-        rgbs_flat = tf.concat(rgbs_chunks, axis=0) # (n_rays, n_samples, -1)
+        rgbs_flat = tf.concat(rgbs_chunks, axis=0)  # (n_rays, n_samples, -1)
         rgbs = tf.reshape(rgbs_flat, pts.shape[:2] + (4,))
         return rgbs
 
@@ -324,20 +324,20 @@ class Model(BaseModel):
         img_dict = {}
         for k, v in data_dict.items():
             if k.endswith('depth'):
-                img = (v - self.near) / (self.far - self.near) # normalize
+                img = (v - self.near) / (self.far - self.near)  # normalize
                 alpha = data_dict[k.replace('depth', 'occu')]
                 bg = np.ones_like(img) if self.white_bg else np.zeros_like(img)
                 img = imgutil.alpha_blend(img, alpha, bg)
             elif k.endswith('disp'):
                 min_disp = 1 / self.far
                 max_disp = 1 / self.near
-                img = (v - min_disp) / (max_disp - min_disp) # normalize
+                img = (v - min_disp) / (max_disp - min_disp)  # normalize
                 alpha = data_dict[k.replace('disp', 'occu')]
                 bg = np.ones_like(img) if self.white_bg else np.zeros_like(img)
                 img = imgutil.alpha_blend(img, alpha, bg)
             elif k in ('coarse_occu', 'fine_occu'):
                 img = 1 - v if self.white_bg else v
-            else: # RGB already [0, 1] and composited onto backgrounds
+            else:  # RGB already [0, 1] and composited onto backgrounds
                 img = v
             img_dict[k] = xm.io.img.write_arr(
                 img, join(outdir, k + '.png'), clip=True)
@@ -408,7 +408,7 @@ class Model(BaseModel):
             outpath = outpref + '.mp4'
             self._compile_into_video(batch_vis_dirs, outpath, fps=fps)
         view_at = viewer_prefix + outpath
-        return view_at # to be logged into TensorBoard
+        return view_at  # to be logged into TensorBoard
 
     def _compile_into_video(self, batch_dirs, out_mp4, fps=12):
         data_root = self.config.get('DEFAULT', 'data_root')
@@ -438,8 +438,8 @@ class Model(BaseModel):
                 frame = imgutil.hconcat((pred, nn))
             else:
                 raise RuntimeError((
-                    "There must be either zero or one nearest neighbor for "
-                    "each test camera, but found %d") % n_nn)
+                                       "There must be either zero or one nearest neighbor for "
+                                       "each test camera, but found %d") % n_nn)
             frames[id_] = frame
         # Make video
         frames_sorted = [frames[k] for k in sorted(frames)]

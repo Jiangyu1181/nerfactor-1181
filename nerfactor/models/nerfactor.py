@@ -14,20 +14,21 @@
 
 # pylint: disable=arguments-differ
 
-from os.path import basename, dirname, join, exists
 from collections import OrderedDict
-from tqdm import tqdm
+from os.path import basename, dirname, join, exists
+
 import numpy as np
 import tensorflow as tf
+from tqdm import tqdm
 
-from third_party.xiuminglib import xiuminglib as xm
-from nerfactor.models.shape import Model as ShapeModel
 from nerfactor.models.brdf import Model as BRDFModel
+from nerfactor.models.shape import Model as ShapeModel
 from nerfactor.networks import mlp
 from nerfactor.networks.embedder import Embedder
 from nerfactor.util import vis as visutil, config as configutil, \
     io as ioutil, tensor as tutil, light as lightutil, img as imgutil, \
     math as mathutil, geom as geomutil
+from third_party.xiuminglib import xiuminglib as xm
 
 
 class Model(ShapeModel):
@@ -59,7 +60,7 @@ class Model(ShapeModel):
         ioutil.restore_model(self.brdf_model, brdf_ckpt)
         self.brdf_model.trainable = False
         # Lighting
-        self._light = None # see the light property
+        self._light = None  # see the light property
         light_h = self.config.getint('DEFAULT', 'light_h')
         self.light_res = (light_h, 2 * light_h)
         lxyz, lareas = self._gen_lights()
@@ -134,7 +135,7 @@ class Model(ShapeModel):
         net['albedo_mlp'] = mlp.Network(
             [mlp_width] * mlp_depth, act=['relu'] * mlp_depth,
             skip_at=[mlp_skip_at])
-        net['albedo_out'] = mlp.Network([3], act=['sigmoid']) # [0, 1]
+        net['albedo_out'] = mlp.Network([3], act=['sigmoid'])  # [0, 1]
         # BRDF Z
         if self.pred_brdf:
             net['brdf_z_mlp'] = mlp.Network(
@@ -147,11 +148,11 @@ class Model(ShapeModel):
                 [mlp_width] * mlp_depth, act=['relu'] * mlp_depth,
                 skip_at=[mlp_skip_at])
             net['normal_out'] = mlp.Network(
-                [3], act=None) # normalized elsewhere
+                [3], act=None)  # normalized elsewhere
             net['lvis_mlp'] = mlp.Network(
                 [mlp_width] * mlp_depth, act=['relu'] * mlp_depth,
                 skip_at=[mlp_skip_at])
-            net['lvis_out'] = mlp.Network([1], act=['sigmoid']) # [0, 1]
+            net['lvis_out'] = mlp.Network([1], act=['sigmoid'])  # [0, 1]
         elif self.shape_mode in ('frozen', 'finetune'):
             shape_model = ShapeModel(self.config_shape)
             ioutil.restore_model(shape_model, self.shape_model_ckpt)
@@ -259,15 +260,15 @@ class Model(ShapeModel):
             brdf_z_override = tf.reshape(brdf_z_override, (1, self.z_dim))
             brdf_prop = tf.tile(brdf_z_override, (tf.shape(brdf_prop)[0], 1))
         brdf = self._eval_brdf_at(
-            surf2l, surf2c, normal_pred, albedo, brdf_prop) # NxLx3
+            surf2l, surf2c, normal_pred, albedo, brdf_prop)  # NxLx3
         # ------ Rendering equation
-        rgb_pred, rgb_olat, rgb_probes = self._render( # all Nx3
+        rgb_pred, rgb_olat, rgb_probes = self._render(  # all Nx3
             lvis_pred, brdf, surf2l, normal_pred, relight_olat=relight_olat,
             relight_probes=relight_probes)
         # Put values back into the full shape
         ind = tf.where(mask)
-        n = tf.shape(alpha)[0] # total number of rays
-        l = tf.shape(lvis_pred)[1] # total number of light directions
+        n = tf.shape(alpha)[0]  # total number of rays
+        l = tf.shape(lvis_pred)[1]  # total number of light directions
         rgb_pred = tf.scatter_nd(ind, rgb_pred, (n, 3))
         normal_pred = tf.scatter_nd(ind, normal_pred, (n, 3))
         lvis_pred = tf.scatter_nd(ind, lvis_pred, (n, l))
@@ -322,20 +323,20 @@ class Model(ShapeModel):
             light = np.ones_like(self.light)
         if white_lvis_override:
             light_vis = np.ones_like(light_vis)
-        cos = tf.einsum('ijk,ik->ij', l, n) # NxL
+        cos = tf.einsum('ijk,ik->ij', l, n)  # NxL
         # Areas for intergration
-        areas = tf.reshape(self.lareas, (1, -1, 1)) # 1xLx1
+        areas = tf.reshape(self.lareas, (1, -1, 1))  # 1xLx1
         # NOTE: unnecessary if light_vis already encodes it, but won't hurt
         front_lit = tf.cast(cos > 0, tf.float32)
-        lvis = front_lit * light_vis # NxL
+        lvis = front_lit * light_vis  # NxL
 
         def integrate(light):
-            light_flat = tf.reshape(light, (-1, 3)) # Lx3
-            light = lvis[:, :, None] * light_flat[None, :, :] # NxLx3
-            light_pix_contrib = brdf * light * cos[:, :, None] * areas # NxLx3
-            rgb = tf.reduce_sum(light_pix_contrib, axis=1) # Nx3
+            light_flat = tf.reshape(light, (-1, 3))  # Lx3
+            light = lvis[:, :, None] * light_flat[None, :, :]  # NxLx3
+            light_pix_contrib = brdf * light * cos[:, :, None] * areas  # NxLx3
+            rgb = tf.reduce_sum(light_pix_contrib, axis=1)  # Nx3
             # Tonemapping
-            rgb = tf.clip_by_value(rgb, 0., 1.) # NOTE
+            rgb = tf.clip_by_value(rgb, 0., 1.)  # NOTE
             # Colorspace transform
             if linear2srgb:
                 rgb = imgutil.linear2srgb(rgb)
@@ -362,17 +363,17 @@ class Model(ShapeModel):
             rgb_probes = tf.concat([x[:, None, :] for x in rgb_probes], axis=1)
             rgb_probes = tf.debugging.check_numerics(
                 rgb_probes, "Light Probe Renders")
-        return rgb, rgb_olat, rgb_probes # Nx3
+        return rgb, rgb_olat, rgb_probes  # Nx3
 
     @property
     def light(self):
-        if self._light is None: # initialize just once
+        if self._light is None:  # initialize just once
             maxv = self.config.getfloat('DEFAULT', 'light_init_max')
             light = tf.random.uniform(
                 self.light_res + (3,), minval=0., maxval=maxv)
             self._light = tf.Variable(light, trainable=True)
         # No negative light
-        return tf.clip_by_value(self._light, 0., np.inf) # 3D
+        return tf.clip_by_value(self._light, 0., np.inf)  # 3D
 
     def _pred_albedo_at(self, pts):
         # Given that albedo generally ranges from 0.1 to 0.8
@@ -381,9 +382,9 @@ class Model(ShapeModel):
         albedo_bias = self.config.getfloat(
             'DEFAULT', 'albedo_bias', fallback=0.1)
         mlp_layers = self.net['albedo_mlp']
-        out_layer = self.net['albedo_out'] # output in [0, 1]
+        out_layer = self.net['albedo_out']  # output in [0, 1]
         embedder = self.embedder['xyz']
-        pts_scaled = self.xyz_scale * pts # transparent to the user
+        pts_scaled = self.xyz_scale * pts  # transparent to the user
 
         def chunk_func(surf):
             surf_embed = embedder(surf)
@@ -391,15 +392,15 @@ class Model(ShapeModel):
             return albedo
 
         albedo = self.chunk_apply(chunk_func, pts_scaled, 3, self.mlp_chunk)
-        albedo = albedo_scale * albedo + albedo_bias # [bias, scale + bias]
+        albedo = albedo_scale * albedo + albedo_bias  # [bias, scale + bias]
         albedo = tf.debugging.check_numerics(albedo, "Albedo")
-        return albedo # Nx3
+        return albedo  # Nx3
 
     def _pred_brdf_at(self, pts):
         mlp_layers = self.net['brdf_z_mlp']
         out_layer = self.net['brdf_z_out']
         embedder = self.embedder['xyz']
-        pts_scaled = self.xyz_scale * pts # transparent to the user
+        pts_scaled = self.xyz_scale * pts  # transparent to the user
 
         def chunk_func(surf):
             surf_embed = embedder(surf)
@@ -408,7 +409,7 @@ class Model(ShapeModel):
 
         brdf_z = self.chunk_apply(
             chunk_func, pts_scaled, self.z_dim, self.mlp_chunk)
-        return brdf_z # NxZ
+        return brdf_z  # NxZ
 
     def _eval_brdf_at(self, pts2l, pts2c, normal, albedo, brdf_prop):
         brdf_scale = self.config.getfloat('DEFAULT', 'learned_brdf_scale')
@@ -421,7 +422,7 @@ class Model(ShapeModel):
         ldir_flat = tf.reshape(ldir, (-1, 3))
         vdir_rep = tf.tile(vdir[:, None, :], (1, tf.shape(ldir)[1], 1))
         vdir_flat = tf.reshape(vdir_rep, (-1, 3))
-        rusink = geomutil.dir2rusink(ldir_flat, vdir_flat) # NLx3
+        rusink = geomutil.dir2rusink(ldir_flat, vdir_flat)  # NLx3
         # Repeat BRDF Z
         z_rep = tf.tile(z[:, None, :], (1, tf.shape(ldir)[1], 1))
         z_flat = tf.reshape(z_rep, (-1, self.z_dim))
@@ -455,10 +456,10 @@ class Model(ShapeModel):
             tf.where(front_lit), brdf_fl, (tf.shape(front_lit)[0], 1))
         # and then reshape the resultant flat tensor
         spec = tf.reshape(brdf_flat, (tf.shape(ldir)[0], tf.shape(ldir)[1], 1))
-        spec = tf.tile(spec, (1, 1, 3)) # becasue they are achromatic
+        spec = tf.tile(spec, (1, 1, 3))  # becasue they are achromatic
         # Combine specular and Lambertian components
         brdf = albedo[:, None, :] / np.pi + spec * brdf_scale
-        return brdf # NxLx3
+        return brdf  # NxLx3
 
     def compute_loss(self, pred, gt, **kwargs):
         """Additional priors on light probes.
@@ -497,31 +498,31 @@ class Model(ShapeModel):
         lvis_pred = imgutil.alpha_blend(lvis_pred, alpha, tensor2=bg)
         lvis_gt = imgutil.alpha_blend(lvis_gt, alpha, tensor2=bg)
         # RGB recon. loss is always here
-        loss = tf.keras.losses.MSE(rgb_gt, rgb_pred) # N
+        loss = tf.keras.losses.MSE(rgb_gt, rgb_pred)  # N
         # If validation, just MSE -- return immediately
         if mode == 'vali':
             return loss
         # If we modify the geometry
         if self.shape_mode in ('scratch', 'finetune'):
             # Predicted values should be close to initial values
-            normal_loss = tf.keras.losses.MSE(normal_gt, normal_pred) # N
-            lvis_loss = tf.keras.losses.MSE(lvis_gt, lvis_pred) # N
+            normal_loss = tf.keras.losses.MSE(normal_gt, normal_pred)  # N
+            lvis_loss = tf.keras.losses.MSE(lvis_gt, lvis_pred)  # N
             loss += normal_loss_weight * normal_loss
             loss += lvis_loss_weight * lvis_loss
             # Predicted values should be smooth
             if normal_jitter is not None:
-                normal_smooth_loss = smooth_loss(normal_pred, normal_jitter) # N
+                normal_smooth_loss = smooth_loss(normal_pred, normal_jitter)  # N
                 loss += self.normal_smooth_weight * normal_smooth_loss
             if lvis_jitter is not None:
-                lvis_smooth_loss = smooth_loss(lvis_pred, lvis_jitter) # N
+                lvis_smooth_loss = smooth_loss(lvis_pred, lvis_jitter)  # N
                 loss += self.lvis_smooth_weight * lvis_smooth_loss
         # Albedo should be smooth
         if albedo_jitter is not None:
-            albedo_smooth_loss = smooth_loss(albedo_pred, albedo_jitter) # N
+            albedo_smooth_loss = smooth_loss(albedo_pred, albedo_jitter)  # N
             loss += self.albedo_smooth_weight * albedo_smooth_loss
         # BRDF property should be smooth
         if brdf_prop_jitter is not None:
-            brdf_smooth_loss = smooth_loss(brdf_prop_pred, brdf_prop_jitter) # N
+            brdf_smooth_loss = smooth_loss(brdf_prop_pred, brdf_prop_jitter)  # N
             loss += self.brdf_smooth_weight * brdf_smooth_loss
         # Light should be smooth
         if mode == 'train':
@@ -582,7 +583,7 @@ class Model(ShapeModel):
         # To NumPy and reshape back to images
         for k, v in data_dict.items():
             if v is None:
-                continue # no-op
+                continue  # no-op
             v_ = v.numpy()
             if k in ('pred_rgb_olat', 'pred_rgb_probes'):
                 v_ = v_.reshape(hw + (v_.shape[1], 3))
@@ -603,10 +604,10 @@ class Model(ShapeModel):
             lareas = self.lareas.numpy()
             lareas_upper = lareas[:(lareas.shape[0] // 2), :]
             weights = np.dstack([lareas_upper] * 3)
-            light = xm.img.normalize_uint(light_uint) # now float
+            light = xm.img.normalize_uint(light_uint)  # now float
             light = xm.img.resize(light, new_h=lareas.shape[0])
             light_upper = light[:(light.shape[0] // 2), :, :]
-            avg_light = np.average( # (3,)
+            avg_light = np.average(  # (3,)
                 light_upper, axis=(0, 1), weights=weights)
             # Composite results on average lighting background
             bg = np.tile(
@@ -617,14 +618,14 @@ class Model(ShapeModel):
         # Write images
         img_dict = {}
         alpha = data_dict['gt_alpha']
-        alpha[alpha < alpha_thres] = 0 # stricter compositing
+        alpha[alpha < alpha_thres] = 0  # stricter compositing
         for k, v in data_dict.items():
             # OLAT-relit RGB
-            if k == 'pred_rgb_olat': # HxWxLx3
+            if k == 'pred_rgb_olat':  # HxWxLx3
                 if v is None:
                     continue
                 olat_names = list(self.novel_olat.keys())
-                olat_first_n = np.prod(self.light_res) // 2 # top half only
+                olat_first_n = np.prod(self.light_res) // 2  # top half only
                 olat_n = 0
                 for i, lname in enumerate(
                         tqdm(olat_names, desc="Writing OLAT-Relit Results")):
@@ -641,7 +642,7 @@ class Model(ShapeModel):
                     img_dict[k_relit] = xm.io.img.write_arr(
                         img, join(outdir, k_relit + '.png'), clip=True)
             # Light probe-relit RGB
-            elif k == 'pred_rgb_probes': # HxWxLx3
+            elif k == 'pred_rgb_probes':  # HxWxLx3
                 if v is None:
                     continue
                 probe_names = list(self.novel_probes.keys())
@@ -653,14 +654,14 @@ class Model(ShapeModel):
                     img_dict[k_relit] = xm.io.img.write_arr(
                         img, join(outdir, k_relit + '.png'), clip=True)
             # RGB
-            elif k.endswith('rgb'): # HxWx3
+            elif k.endswith('rgb'):  # HxWx3
                 bg = np.ones_like(v) if self.white_bg else np.zeros_like(v)
                 img = imgutil.alpha_blend(v, alpha, bg)
                 img_dict[k] = xm.io.img.write_arr(
                     img, join(outdir, k + '.png'), clip=True)
             # Normals
             elif k.endswith('normal'):
-                v_ = (v + 1) / 2 # [-1, 1] to [0, 1]
+                v_ = (v + 1) / 2  # [-1, 1] to [0, 1]
                 bg = np.ones_like(v_) if self.white_bg else np.zeros_like(v_)
                 img = imgutil.alpha_blend(v_, alpha, bg)
                 img_dict[k] = xm.io.img.write_arr(
@@ -674,7 +675,7 @@ class Model(ShapeModel):
                     img, join(outdir, k + '.png'), clip=True)
             # Light visibility
             elif k.endswith('lvis'):
-                mean = np.mean(v, axis=2) # NOTE: average across all lights
+                mean = np.mean(v, axis=2)  # NOTE: average across all lights
                 bg = np.ones_like(mean) if self.white_bg \
                     else np.zeros_like(mean)
                 img = imgutil.alpha_blend(mean, alpha, bg)
@@ -683,7 +684,7 @@ class Model(ShapeModel):
                 # Optionally, visualize per-light vis.
                 if olat_vis:
                     for i in tqdm(
-                            range(4 if self.debug else v.shape[2] // 2), # half
+                            range(4 if self.debug else v.shape[2] // 2),  # half
                             desc="Writing Per-Light Visibility (%s)" % k):
                         v_olat = v[:, :, i]
                         ij = np.unravel_index(i, self.light_res)
@@ -756,7 +757,7 @@ class Model(ShapeModel):
             outpath = outpref + '.mp4'
             self._compile_into_video(batch_vis_dirs, outpath, fps=fps)
         view_at = viewer_prefix + outpath
-        return view_at # to be logged into TensorBoard
+        return view_at  # to be logged into TensorBoard
 
     def _compile_into_webpage(self, batch_dirs, out_html):
         rows, caps, types = [], [], []
@@ -833,7 +834,7 @@ class Model(ShapeModel):
             if frame is not None:
                 frames.append(frame)
         # Relighting
-        relight_view_dir = batch_dirs[-1] # fixed to the final view
+        relight_view_dir = batch_dirs[-1]  # fixed to the final view
         lvis_paths = xm.os.sortglob(relight_view_dir, 'pred_lvis_olat*.png')
         for lvis_path in tqdm(lvis_paths, desc="Final View, OLAT"):
             olat_id = basename(lvis_path)[len('pred_lvis_olat_'):-len('.png')]
@@ -852,8 +853,8 @@ class Model(ShapeModel):
         envmap_names = list(self.novel_probes.keys())
         n_envmaps = len(envmap_names)
         batch_dirs_roundtrip = list(reversed(batch_dirs)) + batch_dirs
-        batch_dirs_roundtrip += batch_dirs_roundtrip # 2nd roundtrip
-        n_views_per_envmap = len(batch_dirs_roundtrip) / n_envmaps # float
+        batch_dirs_roundtrip += batch_dirs_roundtrip  # 2nd roundtrip
+        n_views_per_envmap = len(batch_dirs_roundtrip) / n_envmaps  # float
         map_i = 0
         for view_i, batch_dir in enumerate(
                 tqdm(batch_dirs_roundtrip, desc="View Roundtrip, IBL")):

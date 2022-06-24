@@ -1,18 +1,20 @@
 #!/usr/bin/env python
 
+import os
 import sys
 from os.path import join, basename, exists
-import numpy as np
-from absl import app, flags
-from tqdm import tqdm
-
-from third_party.xiuminglib import xiuminglib as xm
-from data_gen.util import read_light, listify_matrix
-from nerfactor.util import img as imgutil
 
 import bpy
+import numpy as np
+from absl import app, flags
 from mathutils import Matrix
+from tqdm import tqdm
 
+from data_gen.util import read_light, listify_matrix
+from nerfactor.util import img as imgutil
+from third_party.xiuminglib import xiuminglib as xm
+
+os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 
 flags.DEFINE_string('scene_path', '', "path to the Blender scene")
 flags.DEFINE_string('light_path', '', "path to the light probe")
@@ -33,6 +35,7 @@ FLAGS = flags.FLAGS
 
 
 def main(_):
+    # bpy.context.scene.render.engine = 'CYCLES'
     xm.os.makedirs(FLAGS.outdir, rm_if_exists=FLAGS.overwrite)
 
     # ------ Render all views
@@ -101,7 +104,7 @@ def main(_):
             nn_arr[:, :, :3], nn_arr[:, :, 3], avg_light)
         # Embed light probe to top right corner
         imgutil.frame_image(light, rgb=(1, 1, 1), width=1)
-        light_vis_h = int(32 / 256 * nn_comp.shape[0]) # scale light probe size
+        light_vis_h = int(32 / 256 * nn_comp.shape[0])  # scale light probe size
         light = xm.img.resize(light, new_h=light_vis_h)
         nn_comp[:light.shape[0], -light.shape[1]:] = light
         # Write to disk
@@ -121,18 +124,22 @@ def render_view(cam_transform_mat, cam_angle_x, outdir):
         data = {
             'scene': basename(FLAGS.scene_path),
             'cam_transform_mat': cam_transform_mat_str,
-            'cam_angle_x': cam_angle_x, 'envmap': basename(FLAGS.light_path),
-            'envmap_inten': FLAGS.light_inten, 'imh': FLAGS.res,
-            'imw': FLAGS.res, 'spp': FLAGS.spp}
+            'cam_angle_x': cam_angle_x,
+            'envmap': basename(FLAGS.light_path),
+            'envmap_inten': FLAGS.light_inten,
+            'imh': FLAGS.res,
+            'imw': FLAGS.res,
+            'spp': FLAGS.spp}
         xm.io.json.write(data, metadata_json)
 
     # Open scene
     xm.blender.scene.open_blend(FLAGS.scene_path)
 
     # Remove empty tracker that may mess up the camera pose
-    objs = [
-        x for x in bpy.data.objects if x.type == 'EMPTY' and 'Empty' in x.name]
-    bpy.ops.object.delete({'selected_objects': objs})
+    # Jiangyu1181: don't del Empty(track camera), which will get nothing in png
+    # objs = [
+    #     x for x in bpy.data.objects if x.type == 'EMPTY' and 'Empty' in x.name]
+    # bpy.ops.object.delete({'selected_objects': objs})
 
     # Remove undesired objects
     objs = []
@@ -174,6 +181,7 @@ def render_view(cam_transform_mat, cam_angle_x, outdir):
 
     # Render RGBA
     rgba_png = join(outdir, 'rgba.png')
+    # jiangyu1181
     if not exists(rgba_png):
         xm.blender.render.render(rgba_png, cam=cam_obj)
     rgba = xm.io.img.read(rgba_png)
@@ -204,11 +212,11 @@ def render_view(cam_transform_mat, cam_angle_x, outdir):
             # NOTE: not using intensity in JSON; because Blender uses Watts
             # (and fall-off), it's impossible to match exactly our predictions
             xm.blender.light.add_light_env(
-                env=(1, 1, 1, 1), strength=0) # ambient
-            pt_light = xm.blender.light.add_light_point( # point
+                env=(1, 1, 1, 1), strength=0)  # ambient
+            pt_light = xm.blender.light.add_light_point(  # point
                 xyz=olat['point_location'], energy=50_000)
             xm.blender.render.render(outpath, cam=cam_obj)
-            xm.blender.object.remove_objects(pt_light.name) # avoid light accu.
+            xm.blender.object.remove_objects(pt_light.name)  # avoid light accu.
 
     # Render albedo
     # Let's assume white specularity, so the diffuse_color alone is albedo
@@ -224,7 +232,7 @@ def render_view(cam_transform_mat, cam_angle_x, outdir):
                 glossy_color_exr, cam=cam_obj, select='glossy_color')
             glossy_color = xm.io.exr.read(glossy_color_exr)
         else:
-            glossy_color = np.zero_like(diffuse_color)
+            glossy_color = np.zeros_like(diffuse_color)
         albedo = diffuse_color + glossy_color
         albedo = np.dstack((albedo, alpha))
         xm.io.img.write_arr(albedo, albedo_png, clip=True)

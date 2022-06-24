@@ -12,39 +12,48 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 from os import makedirs
 from os.path import join, basename, exists
+
 import numpy as np
+import tensorflow as tf
 from absl import app, flags
 from tqdm import tqdm
-import tensorflow as tf
 
-from third_party.xiuminglib import xiuminglib as xm
 from brdf.renderer import gen_light_xyz
 from nerfactor import datasets
 from nerfactor import models
 from nerfactor.util import io as ioutil, logging as logutil, \
     config as configutil, img as imgutil, geom as geomutil
+from third_party.xiuminglib import xiuminglib as xm
 
+os.environ['AUTOGRAPH_VERBOSITY'] = '1'
+os.environ["TF_FORCE_GPU_ALLOW_GROWTH"] = "true"
 
 flags.DEFINE_string(
-    'trained_nerf', '',
+    'trained_nerf',
+    '/mnt/data2/jy/NeRFactor/output/train/human_nerf512rays1024n1f10/lr5e-4',
     "path to trained NeRF up to (and including) learning rate folder")
-flags.DEFINE_string('data_root', '', "input data root")
-flags.DEFINE_string('out_root', '', "output root")
+flags.DEFINE_string('data_root',
+                    '/mnt/data2/jy/NeRFactor/data/rendered-images/human',
+                    "input data root")
+flags.DEFINE_string('out_root',
+                    '/mnt/data2/jy/NeRFactor/output/surf/human_nerf512rays1024n1f10',
+                    "output root")
 flags.DEFINE_integer(
-    'imh', None, "image height (defaults to what was used for NeRF training)")
+    'imh', 512, "image height (defaults to what was used for NeRF training)")
 flags.DEFINE_string(
     'scene_bbox', None, (
         "format: x_min,x_max,y_min,y_max,z_min,z_max; for bounding real "
         "scenes within a bounding box"))
 flags.DEFINE_float('lvis_far', 1, "far plane for tracing light visibility")
 flags.DEFINE_float(
-    'occu_thres', 0, "occupancy threshold that surface points have to pass")
+    'occu_thres', 0.5, "occupancy threshold that surface points have to pass")
 flags.DEFINE_integer(
     'light_h', 16, "number of pixels along environment map's height (latitude)")
 flags.DEFINE_integer(
-    'mlp_chunk', 1_500_000, (
+    'mlp_chunk', 375000, (
         "chunk size for MLP (bump this up until your GPU gets OOM, "
         "for faster computation)"))
 flags.DEFINE_integer(
@@ -58,6 +67,7 @@ flags.DEFINE_boolean('debug', False, "whether in debug mode")
 FLAGS = flags.FLAGS
 
 logger = logutil.Logger(loggee="geometry_from_nerf")
+# os.environ['CUDA_VISIBLE_DEVICES'] = '6'
 
 
 def main(_):
@@ -72,7 +82,7 @@ def main(_):
     # Load its config.
     config_ini = configutil.get_config_ini(latest_ckpt)
     config = ioutil.read_config(config_ini)
-    if FLAGS.imh is not None: # if using a new image resolution
+    if FLAGS.imh is not None:  # if using a new image resolution
         config.set('DEFAULT', 'imh', str(FLAGS.imh))
 
     # Restore model
@@ -91,7 +101,7 @@ def main(_):
 
 
 def process_view(config, model, batch):
-    sps = int(np.sqrt(FLAGS.spp)) # no need to check if square
+    sps = int(np.sqrt(FLAGS.spp))  # no need to check if square
 
     id_, hw, rayo, rayd, _ = batch
     id_ = id_[0].numpy().decode()
@@ -131,7 +141,7 @@ def process_view(config, model, batch):
     geomutil.write_alpha(alpha_map, out_dir)
 
     # Write XYZ map, whose background filling value is (0, 0, 0)
-    surf = rayo + rayd * exp_depth[:, None] # Surface XYZs
+    surf = rayo + rayd * exp_depth[:, None]  # Surface XYZs
     xyz_map = tf.reshape(surf, (hw[0] * sps, hw[1] * sps, 3))
     xyz_map = average_supersamples(xyz_map, sps)
     xyz_map = imgutil.alpha_blend(xyz_map, alpha_map)
@@ -151,18 +161,18 @@ def process_view(config, model, batch):
     # ------ Tracing from Object to light
 
     # Don't waste memory on those "miss" rays
-    hit = tf.reshape(alpha_map, (-1,)) > 0. # alpha > 0 means occu > occu_thres
+    hit = tf.reshape(alpha_map, (-1,)) > 0.  # alpha > 0 means occu > occu_thres
     surf = tf.boolean_mask(surf, hit, axis=0)
     normal = tf.boolean_mask(exp_normal, hit, axis=0)
 
     lvis_hit = compute_light_visibility(
-        model, surf, normal, config) # (n_surf_pts, n_lights)
+        model, surf, normal, config)  # (n_surf_pts, n_lights)
     lvis_hit = np.clip(lvis_hit, 0., 1.)
     n_lights = lvis_hit.shape[1]
 
     # Put the light visibility values into the full tensor
     hit_map = hit.numpy().reshape(tuple(hw) + (1,))
-    lvis = np.zeros( # (imh, imw, n_lights)
+    lvis = np.zeros(  # (imh, imw, n_lights)
         tuple(hw) + (n_lights,), dtype=np.float32)
     lvis[np.broadcast_to(hit_map, lvis.shape)] = lvis_hit.ravel()
 
@@ -178,7 +188,7 @@ def compute_light_visibility(model, surf, normal, config, lvis_near=.1):
     n_samples_coarse = 64 + config.getint('DEFAULT', 'n_samples_coarse')
     n_samples_fine = 64 + config.getint('DEFAULT', 'n_samples_fine')
     lin_in_disp = config.getboolean('DEFAULT', 'lin_in_disp')
-    perturb = False # NOTE: don't randomize at test time
+    perturb = False  # NOTE: don't randomize at test time
 
     light_w = 2 * FLAGS.light_h
     lxyz, lareas = gen_light_xyz(FLAGS.light_h, light_w)
@@ -188,39 +198,39 @@ def compute_light_visibility(model, surf, normal, config, lvis_near=.1):
 
     n_lights = lxyz_flat.shape[1]
     lvis_hit = np.zeros(
-        (surf.shape[0], n_lights), dtype=np.float32) # (n_surf_pts, n_lights)
+        (surf.shape[0], n_lights), dtype=np.float32)  # (n_surf_pts, n_lights)
     for i in range(0, n_lights, FLAGS.lpix_chunk):
         end_i = min(n_lights, i + FLAGS.lpix_chunk)
-        lxyz_chunk = lxyz_flat[:, i:end_i, :] # (1, lpix_chunk, 3)
+        lxyz_chunk = lxyz_flat[:, i:end_i, :]  # (1, lpix_chunk, 3)
 
         # From surface to lights
-        surf2l = lxyz_chunk - surf[:, None, :] # (n_surf_pts, lpix_chunk, 3)
+        surf2l = lxyz_chunk - surf[:, None, :]  # (n_surf_pts, lpix_chunk, 3)
         surf2l = tf.math.l2_normalize(surf2l, axis=2)
-        surf2l_flat = tf.reshape(surf2l, (-1, 3)) # (n_surf_pts * lpix_chunk, 3)
+        surf2l_flat = tf.reshape(surf2l, (-1, 3))  # (n_surf_pts * lpix_chunk, 3)
 
         surf_rep = tf.tile(surf[:, None, :], (1, surf2l.shape[1], 1))
-        surf_flat = tf.reshape(surf_rep, (-1, 3)) # (n_surf_pts * lpix_chunk, 3)
+        surf_flat = tf.reshape(surf_rep, (-1, 3))  # (n_surf_pts * lpix_chunk, 3)
 
         # Save memory by ignoring back-lit points
         lcos = tf.einsum('ijk,ik->ij', surf2l, normal)
-        front_lit = lcos > 0 # (n_surf_pts, lpix_chunk)
+        front_lit = lcos > 0  # (n_surf_pts, lpix_chunk)
         if tf.reduce_sum(tf.cast(front_lit, float)) == 0:
             # If there is no point being front lit, this visibility buffer is
             # zero everywhere, so no need to update this slice
             continue
         front_lit_flat = tf.reshape(
-            front_lit, (-1,)) # (n_surf_pts * lpix_chunk)
+            front_lit, (-1,))  # (n_surf_pts * lpix_chunk)
         surf_flat_frontlit = tf.boolean_mask(surf_flat, front_lit_flat, axis=0)
-        surf2l_flat_frontlit = tf.boolean_mask( # (n_frontlit_pairs, 3)
+        surf2l_flat_frontlit = tf.boolean_mask(  # (n_frontlit_pairs, 3)
             surf2l_flat, front_lit_flat, axis=0)
 
         # Query coarse model
-        z = model.gen_z( # NOTE: start from lvis_near instead of 0
+        z = model.gen_z(  # NOTE: start from lvis_near instead of 0
             lvis_near, FLAGS.lvis_far, n_samples_coarse,
             surf2l_flat_frontlit.shape[0], lin_in_disp=lin_in_disp,
             perturb=perturb)
         pts = surf_flat_frontlit[:, None, :] + \
-            surf2l_flat_frontlit[:, None, :] * z[:, :, None]
+              surf2l_flat_frontlit[:, None, :] * z[:, :, None]
         pts_flat = tf.reshape(pts, (-1, 3))
         sigma_flat = eval_sigma_mlp(model, pts_flat, use_fine=False)
         sigma = tf.reshape(sigma_flat, pts.shape[:2])
@@ -229,28 +239,28 @@ def compute_light_visibility(model, surf, normal, config, lvis_near=.1):
         # Obtain additional samples using importance sampling
         z = model.gen_z_fine(z, weights, n_samples_fine, perturb=perturb)
         pts = surf_flat_frontlit[:, None, :] + \
-            surf2l_flat_frontlit[:, None, :] * z[:, :, None]
+              surf2l_flat_frontlit[:, None, :] * z[:, :, None]
         pts_flat = tf.reshape(pts, (-1, 3))
 
         # Evaluate all samples with the fine model
         sigma_flat = eval_sigma_mlp(model, pts_flat, use_fine=True)
         sigma = tf.reshape(sigma_flat, pts.shape[:2])
         weights = model.accumulate_sigma(sigma, z, surf2l_flat_frontlit)
-        occu = tf.reduce_sum(weights, -1) # (n_frontlit_pairs,)
+        occu = tf.reduce_sum(weights, -1)  # (n_frontlit_pairs,)
 
         # Put the light visibility values into the full tensor
         front_lit_full = np.zeros(lvis_hit.shape, dtype=bool)
         front_lit_full[:, i:end_i] = front_lit.numpy()
         lvis_hit[front_lit_full] = 1 - occu.numpy()
 
-    return lvis_hit # (n_surf_pts, n_lights)
+    return lvis_hit  # (n_surf_pts, n_lights)
 
 
 def compute_depth_and_normal(model, rayo, rayd, config):
     n_samples_coarse = 64 + config.getint('DEFAULT', 'n_samples_coarse')
     n_samples_fine = 64 + config.getint('DEFAULT', 'n_samples_fine')
     lin_in_disp = config.getboolean('DEFAULT', 'lin_in_disp')
-    perturb = False # NOTE: do not randomize at test time
+    perturb = False  # NOTE: do not randomize at test time
     near = config.getfloat('DEFAULT', 'near')
     far = config.getfloat('DEFAULT', 'far')
 
@@ -258,7 +268,7 @@ def compute_depth_and_normal(model, rayo, rayd, config):
     z = model.gen_z(
         near, far, n_samples_coarse, rayo.shape[0], lin_in_disp=lin_in_disp,
         perturb=perturb)
-    pts = rayo[:, None, :] + rayd[:, None, :] * z[:, :, None] # shape is
+    pts = rayo[:, None, :] + rayd[:, None, :] * z[:, :, None]  # shape is
     # (n_rays, n_samples, 3)
     pts_flat = tf.reshape(pts, (-1, 3))
 
@@ -281,7 +291,7 @@ def compute_depth_and_normal(model, rayo, rayd, config):
     fine_enc = model.net['fine_enc']
     fine_sigma_out = model.net.get(
         'fine_a_out', model.net['fine_sigma_out'])
-    sigma_chunks, normal_chunks = [], [] # chunk by chunk to avoid OOM
+    sigma_chunks, normal_chunks = [], []  # chunk by chunk to avoid OOM
     for i in range(0, pts_flat.shape[0], FLAGS.mlp_chunk):
         end_i = min(pts_flat.shape[0], i + FLAGS.mlp_chunk)
         pts_chunk = pts_flat[i:end_i, :]
@@ -293,7 +303,7 @@ def compute_depth_and_normal(model, rayo, rayd, config):
         # Normals: derivatives of sigma
         bjac_chunk = g.batch_jacobian(sigma_chunk, pts_chunk)
         bjac_chunk = tf.reshape(
-            bjac_chunk, (bjac_chunk.shape[0], 3)) # safe squeezing
+            bjac_chunk, (bjac_chunk.shape[0], 3))  # safe squeezing
         normal_chunk = -tf.linalg.l2_normalize(bjac_chunk, axis=1)
         #
         sigma_chunks.append(sigma_chunk)
@@ -305,14 +315,14 @@ def compute_depth_and_normal(model, rayo, rayd, config):
         sigma_flat, out_ind, tf.zeros((tf.shape(out_ind)[0], 1)))
     assert normal_chunks, "No normal chunk to concat."
     normal_flat = tf.concat(normal_chunks, axis=0)
-    sigma = tf.reshape(sigma_flat, pts.shape[:2]) # (n_rays, n_samples)
-    normal = tf.reshape(normal_flat, pts.shape) # (n_rays, n_samples, 3)
+    sigma = tf.reshape(sigma_flat, pts.shape[:2])  # (n_rays, n_samples)
+    normal = tf.reshape(normal_flat, pts.shape)  # (n_rays, n_samples, 3)
 
     # Accumulate samples into expected depth and normals
-    weights = model.accumulate_sigma(sigma, z, rayd) # (n_rays, n_samples)
-    occu = tf.reduce_sum(weights, -1) # (n_rays,)
+    weights = model.accumulate_sigma(sigma, z, rayd)  # (n_rays, n_samples)
+    occu = tf.reduce_sum(weights, -1)  # (n_rays,)
     # Estimated depth is expected distance
-    exp_depth = tf.reduce_sum(weights * z, axis=-1) # (n_rays,)
+    exp_depth = tf.reduce_sum(weights * z, axis=-1)  # (n_rays,)
     # Computed weighted normal along each ray
     exp_normal = tf.reduce_sum(weights[:, :, None] * normal, axis=-2)
 

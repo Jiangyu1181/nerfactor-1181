@@ -15,13 +15,13 @@
 # pylint: disable=invalid-unary-operand-type
 
 from os.path import dirname, join
+
 import numpy as np
 import tensorflow as tf
 
-from third_party.xiuminglib import xiuminglib as xm
-from nerfactor.util import logging as logutil, io as ioutil, tensor as tutil
 from nerfactor.datasets.nerf import Dataset as BaseDataset
-
+from nerfactor.util import logging as logutil, io as ioutil, tensor as tutil
+from third_party.xiuminglib import xiuminglib as xm
 
 logger = logutil.Logger(loggee="datasets/nerf_shape")
 
@@ -44,6 +44,8 @@ class Dataset(BaseDataset):
             metadata_dir = join(root, '%s_???' % mode_str)
         # Include only cameras with all required buffers (depending on mode)
         metadata_paths, incomplete_paths = [], []
+        # jiangyu1181
+        sample_num = 1
         for metadata_path in xm.os.sortglob(metadata_dir, 'metadata.json'):
             id_ = self._parse_id(metadata_path)
             lvis_path = join(nerf_root, id_, 'lvis.npy')
@@ -61,6 +63,9 @@ class Dataset(BaseDataset):
                 self.meta2buf[metadata_path] = paths
             else:
                 incomplete_paths.append(metadata_path)
+            if sample_num >= 190:
+                break
+            sample_num += 1
         if incomplete_paths:
             logger.warn((
                 "Skipping\n\t%s\nbecause at least one of their paired "
@@ -103,7 +108,7 @@ class Dataset(BaseDataset):
         if alpha_thres is None:
             coords = tf.reshape(coords, (-1, 2))
         else:
-            alpha.set_shape((None, None)) # required by graph mode
+            alpha.set_shape((None, None))  # required by graph mode
             coords = tf.boolean_mask(coords, alpha > alpha_thres)
         # Use tf.random instead of np.random here so that the randomness is
         # correct even if we compile this to static graph using tf.function
@@ -166,11 +171,11 @@ class Dataset(BaseDataset):
                 "Input image is not RGBA"
             rgba = xm.img.normalize_uint(rgba)
             rgb = rgba[:, :, :3]
-            if use_nerf_alpha: # useful for real scenes
+            if use_nerf_alpha:  # useful for real scenes
                 alpha = xm.io.img.load(paths['alpha'])
                 alpha = xm.img.normalize_uint(alpha)
             else:
-                alpha = rgba[:, :, 3] # ground-truth alpha
+                alpha = rgba[:, :, 3]  # ground-truth alpha
         # Resize
         if imh != xyz.shape[0]:
             xyz = xm.img.resize(xyz, new_h=imh)

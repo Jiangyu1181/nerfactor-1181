@@ -22,7 +22,7 @@ logger = logutil.Logger(loggee="datasets/base")
 
 class Dataset():
     def __init__(
-            self, config, mode, debug=False, shuffle_buffer_size=64,
+            self, config, mode, debug=False, shuffle_buffer_size=16,  # jiangyu1181
             prefetch_buffer_size=None, n_map_parallel_calls=None):
         assert mode in ('train', 'vali', 'test'), (
             "Accepted dataset modes: 'train', 'vali', 'test', but input is %s"
